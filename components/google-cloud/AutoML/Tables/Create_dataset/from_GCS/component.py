@@ -47,8 +47,9 @@ def create_dataset_from_GCS_for_Google_Cloud_AutoML_Tables(
 
     # Validating and inferring the arguments
 
+    credentials, default_project_id = google.auth.default()
     if not gcp_project_id:
-        _, gcp_project_id = google.auth.default()
+        gcp_project_id = default_project_id
 
     if not gcp_region:
         gcp_region = 'us-central1'
@@ -78,7 +79,7 @@ def create_dataset_from_GCS_for_Google_Cloud_AutoML_Tables(
             raise ValueError(f'Unknown column type "{data_type}". Supported types: {supported_types}')
 
     logging.info(f'Creating AutoML Tables dataset.')
-    automl_client = automl.AutoMlClient()
+    automl_client = automl.AutoMlClient(credentials=credentials)
 
     project_location_path = f'projects/{gcp_project_id}/locations/{gcp_region}'
 
