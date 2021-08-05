@@ -1,0 +1,268 @@
+name: Deploy vertex ai model to endpoint
+description: Deploys Google Cloud Vertex AI Model to a Google Cloud Vertex AI Endpoint.
+inputs:
+- {name: model_name, type: String, description: Full resource name of a Google Cloud
+    Vertex AI Model}
+- name: endpoint_name
+  type: String
+  description: |-
+    Full name of Google Cloud Vertex Endpoint. A new
+    endpoint is created if the name is not passed.
+  optional: true
+- name: machine_type
+  type: String
+  description: |-
+    The type of the machine. See the [list of machine types
+    supported for
+    prediction](https://cloud.google.com/vertex-ai/docs/predictions/configure-compute#machine-types).
+    Defaults to "n1-standard-2"
+  default: n1-standard-2
+  optional: true
+- name: min_replica_count
+  type: Integer
+  description: |-
+    The minimum number of replicas the DeployedModel
+    will be always deployed on. If traffic against it increases, it may
+    dynamically be deployed onto more replicas up to max_replica_count, and as
+    traffic decreases, some of these extra replicas may be freed. If the
+    requested value is too large, the deployment will error. Defaults to 1.
+  default: '1'
+  optional: true
+- name: max_replica_count
+  type: Integer
+  description: |-
+    The maximum number of replicas this DeployedModel
+    may be deployed on when the traffic against it increases. If the requested
+    value is too large, the deployment will error, but if deployment succeeds
+    then the ability to scale the model to that many replicas is guaranteed
+    (barring service outages). If traffic against the DeployedModel increases
+    beyond what its replicas at maximum may handle, a portion of the traffic
+    will be dropped. If this value is not provided, a no upper bound for
+    scaling under heavy traffic will be assume, though Vertex AI may be unable
+    to scale beyond certain replica number. Defaults to `min_replica_count`
+  optional: true
+- name: endpoint_display_name
+  type: String
+  description: |-
+    The display name of the Endpoint. The name can
+    be up to 128 characters long and can be consist of any UTF-8 characters.
+    Defaults to the lowercased model ID.
+  optional: true
+- name: deployed_model_display_name
+  type: String
+  description: |-
+    The display name of the DeployedModel. If
+    not provided upon creation, the Model's display_name is used.
+  optional: true
+- {name: project, type: String, description: The Google Cloud project ID. Defaults
+    to the default project., optional: true}
+- {name: location, type: String, description: The Google Cloud region. Defaults to
+    "us-central1", default: us-central1, optional: true}
+- {name: timeout, type: Float, description: Model deployment timeout, optional: true}
+outputs:
+- {name: deployed_model_id, type: String}
+implementation:
+  container:
+    image: python:3.7
+    command:
+    - sh
+    - -c
+    - (PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location
+      'google-cloud-aiplatform==1.3.0' || PIP_DISABLE_PIP_VERSION_CHECK=1 python3
+      -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform==1.3.0'
+      --user) && "$0" "$@"
+    - sh
+    - -ec
+    - |
+      program_path=$(mktemp)
+      printf "%s" "$0" > "$program_path"
+      python3 -u "$program_path" "$@"
+    - |
+      def deploy_vertex_ai_model_to_endpoint(
+          model_name,
+          endpoint_name = None,
+          machine_type = "n1-standard-2",
+          min_replica_count = 1,
+          max_replica_count = None,
+          endpoint_display_name = None,
+          deployed_model_display_name = None,
+          project = None,
+          location = "us-central1",
+          timeout = None,
+      ):
+        """Deploys Google Cloud Vertex AI Model to a Google Cloud Vertex AI Endpoint.
+
+        Args:
+          model_name: Full resource name of a Google Cloud Vertex AI Model
+          endpoint_name: Full name of Google Cloud Vertex Endpoint. A new
+            endpoint is created if the name is not passed.
+          machine_type: The type of the machine. See the [list of machine types
+            supported for
+            prediction](https://cloud.google.com/vertex-ai/docs/predictions/configure-compute#machine-types).
+            Defaults to "n1-standard-2"
+          min_replica_count: The minimum number of replicas the DeployedModel
+            will be always deployed on. If traffic against it increases, it may
+            dynamically be deployed onto more replicas up to max_replica_count, and as
+            traffic decreases, some of these extra replicas may be freed. If the
+            requested value is too large, the deployment will error. Defaults to 1.
+          max_replica_count: The maximum number of replicas this DeployedModel
+            may be deployed on when the traffic against it increases. If the requested
+            value is too large, the deployment will error, but if deployment succeeds
+            then the ability to scale the model to that many replicas is guaranteed
+            (barring service outages). If traffic against the DeployedModel increases
+            beyond what its replicas at maximum may handle, a portion of the traffic
+            will be dropped. If this value is not provided, a no upper bound for
+            scaling under heavy traffic will be assume, though Vertex AI may be unable
+            to scale beyond certain replica number. Defaults to `min_replica_count`
+          endpoint_display_name: The display name of the Endpoint. The name can
+            be up to 128 characters long and can be consist of any UTF-8 characters.
+            Defaults to the lowercased model ID.
+          deployed_model_display_name: The display name of the DeployedModel. If
+            not provided upon creation, the Model's display_name is used.
+          project: The Google Cloud project ID. Defaults to the default project.
+          location: The Google Cloud region. Defaults to "us-central1"
+          timeout: Model deployment timeout
+        """
+        import logging
+        import google
+        import google.auth
+        from google.cloud.aiplatform import gapic
+
+        _logger = logging.getLogger(__name__)
+
+        # Create an endpoint
+        # See https://github.com/googleapis/python-aiplatform/blob/master/samples/snippets/create_endpoint_sample.py
+        _, default_project = google.auth.default()
+        if not project:
+          project = default_project
+        model_id = model_name.split("/")[-1]
+
+        client_options = {
+            "api_endpoint": f"{location}-aiplatform.googleapis.com",
+        }
+        endpoint_client = gapic.EndpointServiceClient(client_options=client_options)
+        if not endpoint_name:
+          if not endpoint_display_name:
+            endpoint_display_name = model_id
+          _logger.info("Creating new Endpoint: %s", endpoint_display_name)
+          endpoint_to_create = {
+              "display_name": endpoint_display_name,
+          }
+          endpoint = endpoint_client.create_endpoint(
+              parent=f"projects/{project}/locations/{location}",
+              endpoint=endpoint_to_create,
+          ).result(timeout=timeout)
+          endpoint_name = endpoint.name
+        # projects/<project_id>/locations/<location>/endpoints/<endpoint_id>
+        _logger.info("Endpoint name: %s", endpoint_name)
+
+        # Deploy the model
+        # See https://github.com/googleapis/python-aiplatform/blob/master/samples/snippets/deploy_model_custom_trained_model_sample.py
+        model_to_deploy = {
+            "model": model_name,
+            "display_name": deployed_model_display_name,
+            "dedicated_resources": {
+                "min_replica_count": min_replica_count,
+                "max_replica_count": max_replica_count,
+                "machine_spec": {
+                    "machine_type": machine_type,
+                },
+            },
+        }
+        traffic_split = {"0": 100}
+        _logger.info(
+            "Deploying model %s to endpoint: %s", model_name, endpoint_display_name)
+        deploy_model_operation = endpoint_client.deploy_model(
+            endpoint=endpoint_name,
+            deployed_model=model_to_deploy,
+            traffic_split=traffic_split,
+        )
+        deployed_model = deploy_model_operation.result().deployed_model
+        return deployed_model.id
+
+      def _serialize_str(str_value: str) -> str:
+          if not isinstance(str_value, str):
+              raise TypeError('Value "{}" has type "{}" instead of str.'.format(str(str_value), str(type(str_value))))
+          return str_value
+
+      import argparse
+      _parser = argparse.ArgumentParser(prog='Deploy vertex ai model to endpoint', description='Deploys Google Cloud Vertex AI Model to a Google Cloud Vertex AI Endpoint.')
+      _parser.add_argument("--model-name", dest="model_name", type=str, required=True, default=argparse.SUPPRESS)
+      _parser.add_argument("--endpoint-name", dest="endpoint_name", type=str, required=False, default=argparse.SUPPRESS)
+      _parser.add_argument("--machine-type", dest="machine_type", type=str, required=False, default=argparse.SUPPRESS)
+      _parser.add_argument("--min-replica-count", dest="min_replica_count", type=int, required=False, default=argparse.SUPPRESS)
+      _parser.add_argument("--max-replica-count", dest="max_replica_count", type=int, required=False, default=argparse.SUPPRESS)
+      _parser.add_argument("--endpoint-display-name", dest="endpoint_display_name", type=str, required=False, default=argparse.SUPPRESS)
+      _parser.add_argument("--deployed-model-display-name", dest="deployed_model_display_name", type=str, required=False, default=argparse.SUPPRESS)
+      _parser.add_argument("--project", dest="project", type=str, required=False, default=argparse.SUPPRESS)
+      _parser.add_argument("--location", dest="location", type=str, required=False, default=argparse.SUPPRESS)
+      _parser.add_argument("--timeout", dest="timeout", type=float, required=False, default=argparse.SUPPRESS)
+      _parser.add_argument("----output-paths", dest="_output_paths", type=str, nargs=1)
+      _parsed_args = vars(_parser.parse_args())
+      _output_files = _parsed_args.pop("_output_paths", [])
+
+      _outputs = deploy_vertex_ai_model_to_endpoint(**_parsed_args)
+
+      _output_serializers = [
+          _serialize_str,
+
+      ]
+
+      import os
+      for idx, output_file in enumerate(_output_files):
+          try:
+              os.makedirs(os.path.dirname(output_file))
+          except OSError:
+              pass
+          with open(output_file, 'w') as f:
+              f.write(_output_serializers[idx](_outputs[idx]))
+    args:
+    - --model-name
+    - {inputValue: model_name}
+    - if:
+        cond: {isPresent: endpoint_name}
+        then:
+        - --endpoint-name
+        - {inputValue: endpoint_name}
+    - if:
+        cond: {isPresent: machine_type}
+        then:
+        - --machine-type
+        - {inputValue: machine_type}
+    - if:
+        cond: {isPresent: min_replica_count}
+        then:
+        - --min-replica-count
+        - {inputValue: min_replica_count}
+    - if:
+        cond: {isPresent: max_replica_count}
+        then:
+        - --max-replica-count
+        - {inputValue: max_replica_count}
+    - if:
+        cond: {isPresent: endpoint_display_name}
+        then:
+        - --endpoint-display-name
+        - {inputValue: endpoint_display_name}
+    - if:
+        cond: {isPresent: deployed_model_display_name}
+        then:
+        - --deployed-model-display-name
+        - {inputValue: deployed_model_display_name}
+    - if:
+        cond: {isPresent: project}
+        then:
+        - --project
+        - {inputValue: project}
+    - if:
+        cond: {isPresent: location}
+        then:
+        - --location
+        - {inputValue: location}
+    - if:
+        cond: {isPresent: timeout}
+        then:
+        - --timeout
+        - {inputValue: timeout}
+    - '----output-paths'
+    - {outputPath: deployed_model_id}

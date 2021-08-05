@@ -1,0 +1,102 @@
+name: Create model in Google Cloud Vertex AI
+inputs:
+- {name: serving_container_image_uri, type: String}
+- {name: artifact_uri, type: String, optional: true}
+- {name: display_name, type: String, default: Model, optional: true}
+- {name: project, type: String, optional: true}
+- {name: location, type: String, default: us-central1, optional: true}
+outputs:
+- {name: model_name, type: String}
+implementation:
+  container:
+    image: python:3.7
+    command:
+    - sh
+    - -c
+    - (PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location
+      'google-cloud-aiplatform==1.3.0' || PIP_DISABLE_PIP_VERSION_CHECK=1 python3
+      -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform==1.3.0'
+      --user) && "$0" "$@"
+    - sh
+    - -ec
+    - |
+      program_path=$(mktemp)
+      printf "%s" "$0" > "$program_path"
+      python3 -u "$program_path" "$@"
+    - |
+      def create_model_in_Google_Cloud_Vertex_AI(
+          serving_container_image_uri,
+          artifact_uri = None,
+          display_name = "Model",
+          project = None,
+          location = "us-central1",
+      ):
+        from google.cloud import aiplatform
+
+        aiplatform.init(
+            project=project,
+            location=location,
+        )
+        model = aiplatform.Model.upload(
+            display_name=display_name or "Model",
+            serving_container_image_uri=serving_container_image_uri,
+            artifact_uri=artifact_uri,
+        )
+        return (model.name,)
+
+      def _serialize_str(str_value: str) -> str:
+          if not isinstance(str_value, str):
+              raise TypeError('Value "{}" has type "{}" instead of str.'.format(str(str_value), str(type(str_value))))
+          return str_value
+
+      import argparse
+      _parser = argparse.ArgumentParser(prog='Create model in Google Cloud Vertex AI', description='')
+      _parser.add_argument("--serving-container-image-uri", dest="serving_container_image_uri", type=str, required=True, default=argparse.SUPPRESS)
+      _parser.add_argument("--artifact-uri", dest="artifact_uri", type=str, required=False, default=argparse.SUPPRESS)
+      _parser.add_argument("--display-name", dest="display_name", type=str, required=False, default=argparse.SUPPRESS)
+      _parser.add_argument("--project", dest="project", type=str, required=False, default=argparse.SUPPRESS)
+      _parser.add_argument("--location", dest="location", type=str, required=False, default=argparse.SUPPRESS)
+      _parser.add_argument("----output-paths", dest="_output_paths", type=str, nargs=1)
+      _parsed_args = vars(_parser.parse_args())
+      _output_files = _parsed_args.pop("_output_paths", [])
+
+      _outputs = create_model_in_Google_Cloud_Vertex_AI(**_parsed_args)
+
+      _output_serializers = [
+          _serialize_str,
+
+      ]
+
+      import os
+      for idx, output_file in enumerate(_output_files):
+          try:
+              os.makedirs(os.path.dirname(output_file))
+          except OSError:
+              pass
+          with open(output_file, 'w') as f:
+              f.write(_output_serializers[idx](_outputs[idx]))
+    args:
+    - --serving-container-image-uri
+    - {inputValue: serving_container_image_uri}
+    - if:
+        cond: {isPresent: artifact_uri}
+        then:
+        - --artifact-uri
+        - {inputValue: artifact_uri}
+    - if:
+        cond: {isPresent: display_name}
+        then:
+        - --display-name
+        - {inputValue: display_name}
+    - if:
+        cond: {isPresent: project}
+        then:
+        - --project
+        - {inputValue: project}
+    - if:
+        cond: {isPresent: location}
+        then:
+        - --location
+        - {inputValue: location}
+    - '----output-paths'
+    - {outputPath: model_name}
